@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import type { Request, Response } from 'express';
 import {
@@ -6,19 +7,66 @@ import {
   STATUS_TRANSITIONS,
   type ApplicationStatus,
 } from '../models/Application.js';
-import { Job } from '../models/Job.js';
-import { User } from '../models/User.js';
+import { Job, type IJob } from '../models/Job.js';
+import { User, type IUser } from '../models/User.js';
 import { UPLOAD_DIR } from '../middleware/upload.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { isDuplicateKeyError } from '../utils/mongoErrors.js';
+import { extractTextFromFile, parseResumeText } from '../services/resumeParser.js';
+import { generateEmbedding, searchJobApplicants } from '../services/semanticSearch.js';
+import { evaluateCandidate, queryJobCopilot } from '../services/aiAssistant.js';
+import { sendNotification } from './notification.controller.js';
+
+/**
+ * Async background worker to extract text, structure profile JSON, redact PII,
+ * compute semantic vector embedding, and run initial AI evaluation.
+ */
+async function processResumeAsync(
+  applicationId: string,
+  resumeFilename: string,
+  applicantId: string,
+  jobId: string
+): Promise<void> {
+  try {
+    const filePath = path.join(UPLOAD_DIR, path.basename(resumeFilename));
+    const rawText = await extractTextFromFile(filePath);
+    const applicant = await User.findById(applicantId).select('name skills headline experienceYears');
+    const job = await Job.findById(jobId);
+
+    const { parsedProfile, redactedProfile } = parseResumeText(rawText, {
+      name: applicant?.name,
+      skills: applicant?.skills,
+      headline: applicant?.headline,
+      experienceYears: applicant?.experienceYears,
+    });
+
+    const combinedText = `${rawText} ${parsedProfile.skills.join(' ')} ${parsedProfile.summary} ${applicant?.headline ?? ''}`;
+    const embedding = generateEmbedding(combinedText);
+
+    let aiReview;
+    if (job && applicant) {
+      aiReview = evaluateCandidate(job, { parsedProfile } as any, applicant as any);
+    }
+
+    await Application.updateOne(
+      { _id: applicationId },
+      {
+        $set: {
+          parsedProfile,
+          redactedProfile,
+          embedding,
+          ...(aiReview ? { aiReview } : {}),
+        },
+      }
+    );
+  } catch (err) {
+    console.error(`[asyncResumeProcessing] failed for app ${applicationId}:`, err);
+  }
+}
 
 /**
  * POST /api/jobs/:id/apply — candidate applies, optionally uploading a resume.
- *
- * The unique (job, applicant) index is what actually prevents double
- * applications; the pre-check below only exists to return a friendlier error
- * than a raw duplicate-key failure when two requests race.
  */
 export const applyToJob = asyncHandler(async (req: Request, res: Response) => {
   const jobId = req.params.id;
@@ -47,9 +95,20 @@ export const applyToJob = asyncHandler(async (req: Request, res: Response) => {
     throw err;
   }
 
-  // $inc is atomic server-side, so concurrent applicants cannot clobber
-  // each other's increment the way a read-modify-write would.
+  // Atomically increment applicant counter
   await Job.updateOne({ _id: job._id }, { $inc: { applicantCount: 1 } });
+
+  // Fire async background resume extraction & semantic indexing
+  setImmediate(() => {
+    processResumeAsync(application._id.toString(), resumeUrl, userId, job._id.toString());
+    sendNotification(
+      job.postedBy.toString(),
+      'application_received',
+      'New Application Received',
+      `A new candidate submitted an application for ${job.title}`,
+      `/jobs/${job._id}/applicants`
+    );
+  });
 
   res.status(201).json({ success: true, data: application });
 });
@@ -135,6 +194,15 @@ export const updateApplicationStatus = asyncHandler(async (req: Request, res: Re
   application.history.push({ status, at: new Date(), note });
   await application.save();
 
+  // Notify candidate of status update
+  sendNotification(
+    application.applicant.toString(),
+    'status_update',
+    'Application Status Updated',
+    `Your application for "${job.title}" has been updated to: ${status}`,
+    '/my-applications'
+  );
+
   res.json({ success: true, data: application });
 });
 
@@ -160,7 +228,7 @@ export const withdrawApplication = asyncHandler(async (req: Request, res: Respon
   res.json({ success: true, message: 'Application withdrawn' });
 });
 
-/** GET /api/applications/:id/resume — streams the resume to the owner or the recruiter. */
+/** GET /api/applications/:id/resume — streams the resume to download. */
 export const downloadResume = asyncHandler(async (req: Request, res: Response) => {
   const application = await Application.findById(req.params.id).populate('job', 'postedBy');
   if (!application) throw ApiError.notFound('Application not found');
@@ -172,8 +240,6 @@ export const downloadResume = asyncHandler(async (req: Request, res: Response) =
     throw ApiError.forbidden('You do not have access to this resume');
   }
 
-  // basename() strips any directory component, so a tampered stored value
-  // cannot walk out of the uploads folder.
   const filePath = path.join(UPLOAD_DIR, path.basename(application.resumeUrl));
   try {
     await fs.access(filePath);
@@ -182,6 +248,83 @@ export const downloadResume = asyncHandler(async (req: Request, res: Response) =
   }
 
   res.download(filePath);
+});
+
+/** GET /api/applications/:id/resume/view — displays resume inline in browser preview. */
+export const viewResume = asyncHandler(async (req: Request, res: Response) => {
+  const application = await Application.findById(req.params.id).populate('job', 'postedBy');
+  if (!application) throw ApiError.notFound('Application not found');
+
+  const job = application.job as unknown as { postedBy: { toString(): string } };
+  const isApplicant = application.applicant.toString() === req.user!.id;
+  const isRecruiter = job.postedBy.toString() === req.user!.id;
+  if (!isApplicant && !isRecruiter && req.user!.role !== 'admin') {
+    throw ApiError.forbidden('You do not have access to this resume');
+  }
+
+  const filePath = path.join(UPLOAD_DIR, path.basename(application.resumeUrl));
+  try {
+    await fs.access(filePath);
+  } catch {
+    throw ApiError.notFound('Resume file is no longer available');
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  let contentType = 'application/octet-stream';
+  if (ext === '.pdf') contentType = 'application/pdf';
+  else if (ext === '.txt') contentType = 'text/plain';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', `inline; filename="${path.basename(application.resumeUrl)}"`);
+  const stream = createReadStream(filePath);
+  stream.pipe(res);
+});
+
+/** POST /api/applications/:id/ai-eval — evaluate candidate against job requirements. */
+export const evaluateApplicantController = asyncHandler(async (req: Request, res: Response) => {
+  const application = await Application.findById(req.params.id)
+    .populate('job')
+    .populate('applicant');
+  if (!application) throw ApiError.notFound('Application not found');
+
+  const job = application.job as unknown as IJob;
+  assertOwnsJob(job.postedBy.toString(), req);
+
+  const applicant = application.applicant as unknown as IUser;
+  const aiReview = evaluateCandidate(job, application, applicant);
+
+  application.aiReview = aiReview;
+  await application.save();
+
+  res.json({ success: true, data: aiReview });
+});
+
+/** GET /api/jobs/:id/applicants/search — semantic or keyword search across applicants. */
+export const searchApplicantsController = asyncHandler(async (req: Request, res: Response) => {
+  const jobId = req.params.id;
+  const query = (req.query.query as string) ?? '';
+  const mode = (req.query.mode as 'keyword' | 'semantic') ?? 'semantic';
+
+  const results = await searchJobApplicants(jobId, query, mode, req.user!.id, req.user!.role);
+  res.json({ success: true, data: results });
+});
+
+/** POST /api/jobs/:id/ai-assistant — interactive AI copilot for recruiter. */
+export const askJobCopilotController = asyncHandler(async (req: Request, res: Response) => {
+  const jobId = req.params.id;
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== 'string') throw ApiError.badRequest('Prompt is required');
+
+  const job = await Job.findById(jobId);
+  if (!job) throw ApiError.notFound('Job not found');
+  assertOwnsJob(job.postedBy.toString(), req);
+
+  const applications = await Application.find({ job: job._id })
+    .populate('applicant', 'name email headline skills experienceYears')
+    .lean();
+
+  const response = queryJobCopilot(job, applications as any, prompt);
+  res.json({ success: true, data: response });
 });
 
 async function resolveResumeUrl(req: Request, userId: string): Promise<string> {

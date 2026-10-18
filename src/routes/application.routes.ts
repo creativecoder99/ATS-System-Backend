@@ -29,6 +29,19 @@ router.get(
   applicationController.downloadResume,
 );
 
+router.get(
+  '/:id/resume/view',
+  validate({ params: objectIdSchema }),
+  applicationController.viewResume,
+);
+
+router.post(
+  '/:id/ai-eval',
+  requireRole('recruiter', 'admin'),
+  validate({ params: objectIdSchema }),
+  applicationController.evaluateApplicantController,
+);
+
 router.delete(
   '/:id',
   requireRole('candidate'),

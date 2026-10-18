@@ -11,6 +11,9 @@ import { User } from './models/User.js';
 import { Job } from './models/Job.js';
 import { Application } from './models/Application.js';
 import { SavedJob } from './models/SavedJob.js';
+import { Notification } from './models/Notification.js';
+import { generateEmbedding } from './services/semanticSearch.js';
+import { evaluateCandidate } from './services/aiAssistant.js';
 
 const PASSWORD = 'Password123';
 
@@ -237,18 +240,71 @@ async function seed() {
     for (const job of jobs.slice(ci, ci + 4)) {
       const jobIndex = jobs.indexOf(job);
       const status = statuses[(ci + jobIndex) % statuses.length];
-      await Application.create({
+      const candidateSkills = candidate.skills;
+      const combinedText = `${candidate.name} ${candidate.headline} ${candidateSkills.join(' ')} ${job.title} ${job.company}`;
+      const embedding = generateEmbedding(combinedText);
+      const anonymizedNum = Math.abs((ci * 31 + jobIndex * 17) % 9000) + 1000;
+
+      const parsedProfile = {
+        skills: candidateSkills,
+        experienceYears: candidate.experienceYears,
+        education: ['B.Tech in Computer Science & Engineering'],
+        summary: `${candidate.headline}. Experienced in ${candidateSkills.slice(0, 4).join(', ')}.`,
+        rawTextSnippet: `Verified Resume for ${candidate.name} — Skills: ${candidateSkills.join(', ')}.`,
+        parsedAt: daysAgo(jobIndex),
+      };
+
+      const redactedProfile = {
+        anonymizedId: `Candidate #${anonymizedNum}`,
+        skills: candidateSkills,
+        experienceYears: candidate.experienceYears,
+        educationDegrees: ['B.Tech in Computer Science & Engineering'],
+        summary: `Qualified software engineer with ${candidate.experienceYears} year(s) of experience in ${candidateSkills.slice(0, 4).join(', ')}.`,
+      };
+
+      const aiReview = evaluateCandidate(job as any, { parsedProfile } as any, candidate as any);
+
+      const app = await Application.create({
         job: job._id,
         applicant: candidate._id,
         resumeUrl: 'sample-resume.pdf',
         coverLetter: `I am very interested in the ${job.title} role at ${job.company}. My background in ${candidate.skills.slice(0, 2).join(' and ')} lines up well with what you are looking for.`,
         status,
         history: buildHistory(status),
+        parsedProfile,
+        redactedProfile,
+        embedding,
+        aiReview,
         createdAt: daysAgo(jobIndex),
       });
+
+      // Sample notification for candidate
+      if (status !== 'applied') {
+        await Notification.create({
+          recipient: candidate._id,
+          type: 'status_update',
+          title: 'Application Status Update',
+          message: `Your application for "${job.title}" at ${job.company} has moved to ${status}.`,
+          link: '/my-applications',
+          read: ci > 1,
+          createdAt: daysAgo(Math.max(0, jobIndex - 1)),
+        });
+      }
+
       applicationCount += 1;
     }
   }
+
+  // Sample recruiter notification
+  await Notification.create({
+    recipient: recruiters[0]._id,
+    type: 'application_received',
+    title: 'New Candidate Applied',
+    message: 'Abhinav Tarigoppula submitted an application for Full Stack Developer (MERN).',
+    link: `/jobs/${jobs[0]._id}/applicants`,
+    read: false,
+    createdAt: daysAgo(1),
+  });
 
   // Recompute the denormalised counters from the truth rather than guessing.
   const counts = await Application.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
@@ -257,7 +313,7 @@ async function seed() {
   await Promise.all(
     counts.map((c) => Job.updateOne({ _id: c._id }, { $set: { applicantCount: c.count } })),
   );
-  console.log(`[seed] created ${applicationCount} applications`);
+  console.log(`[seed] created ${applicationCount} applications with AI reviews and vector embeddings`);
 
   await SavedJob.create([
     { user: candidates[0]._id, job: jobs[4]._id },

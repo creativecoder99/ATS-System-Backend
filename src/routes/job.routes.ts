@@ -59,6 +59,22 @@ router.get(
   applicationController.listJobApplications,
 );
 
+router.get(
+  '/:id/applicants/search',
+  requireAuth,
+  requireRole('recruiter', 'admin'),
+  validate({ params: objectIdSchema }),
+  applicationController.searchApplicantsController,
+);
+
+router.post(
+  '/:id/ai-assistant',
+  requireAuth,
+  requireRole('recruiter', 'admin'),
+  validate({ params: objectIdSchema }),
+  applicationController.askJobCopilotController,
+);
+
 router.post(
   '/:id/save',
   requireAuth,

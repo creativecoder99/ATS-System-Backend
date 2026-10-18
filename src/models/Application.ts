@@ -22,6 +22,33 @@ export const STATUS_TRANSITIONS: Record<ApplicationStatus, ApplicationStatus[]> 
   rejected: [],
 };
 
+export interface IParsedProfile {
+  skills: string[];
+  experienceYears: number;
+  education: string[];
+  summary: string;
+  rawTextSnippet?: string;
+  parsedAt?: Date;
+}
+
+export interface IRedactedProfile {
+  anonymizedId: string;
+  skills: string[];
+  experienceYears: number;
+  educationDegrees: string[];
+  summary: string;
+}
+
+export interface IAiReview {
+  matchScore: number; // 0-100
+  rating: 'Strong Match' | 'Moderate Match' | 'Potential Match' | 'Low Fit';
+  strengths: string[];
+  gaps: string[];
+  interviewQuestions: string[];
+  summary: string;
+  analyzedAt?: Date;
+}
+
 export interface IApplication extends Document {
   _id: Types.ObjectId;
   job: Types.ObjectId;
@@ -30,6 +57,10 @@ export interface IApplication extends Document {
   coverLetter?: string;
   resumeUrl: string;
   history: { status: ApplicationStatus; at: Date; note?: string }[];
+  parsedProfile?: IParsedProfile;
+  redactedProfile?: IRedactedProfile;
+  embedding?: number[];
+  aiReview?: IAiReview;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +83,37 @@ const applicationSchema = new Schema<IApplication>(
       ],
       default: [],
     },
+    parsedProfile: {
+      skills: [{ type: String }],
+      experienceYears: { type: Number, default: 0 },
+      education: [{ type: String }],
+      summary: { type: String },
+      rawTextSnippet: { type: String },
+      parsedAt: { type: Date },
+    },
+    redactedProfile: {
+      anonymizedId: { type: String },
+      skills: [{ type: String }],
+      experienceYears: { type: Number, default: 0 },
+      educationDegrees: [{ type: String }],
+      summary: { type: String },
+    },
+    embedding: {
+      type: [Number],
+      select: false, // Omit heavy embedding array from regular queries by default
+    },
+    aiReview: {
+      matchScore: { type: Number },
+      rating: {
+        type: String,
+        enum: ['Strong Match', 'Moderate Match', 'Potential Match', 'Low Fit'],
+      },
+      strengths: [{ type: String }],
+      gaps: [{ type: String }],
+      interviewQuestions: [{ type: String }],
+      summary: { type: String },
+      analyzedAt: { type: Date },
+    },
   },
   { timestamps: true },
 );
@@ -61,6 +123,9 @@ applicationSchema.index({ job: 1, applicant: 1 }, { unique: true });
 
 // Serves the candidate's "my applications, newest first" view.
 applicationSchema.index({ applicant: 1, createdAt: -1 });
+
+// Serves recruiter filtering by status on a job.
+applicationSchema.index({ job: 1, status: 1 });
 
 export const Application: Model<IApplication> =
   mongoose.models.Application ?? mongoose.model<IApplication>('Application', applicationSchema);
