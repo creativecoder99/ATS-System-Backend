@@ -14,6 +14,8 @@ const router = Router();
 // match "mine" and "saved" as an id and the CastError would surface instead.
 router.get('/mine', requireAuth, requireRole('recruiter', 'admin'), jobController.listMyJobs);
 router.get('/saved', requireAuth, savedJobController.listSavedJobs);
+router.get('/companies', jobController.listCompanies);
+
 
 router.get('/', validate({ query: listJobsSchema }), jobController.listJobs);
 router.post(

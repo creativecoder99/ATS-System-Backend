@@ -207,3 +207,31 @@ describe('GET /api/jobs/mine', () => {
     ]);
   });
 });
+
+describe('GET /api/jobs/companies', () => {
+  it('returns aggregated distinct companies with active open job counts', async () => {
+    const recruiter = await makeUser('recruiter');
+    await seedJob(recruiter.id, { company: 'Alpha Inc', status: 'open', location: 'Remote', skills: ['React', 'Node.js'] });
+    await seedJob(recruiter.id, { company: 'Alpha Inc', status: 'open', location: 'Bangalore', skills: ['TypeScript'] });
+    await seedJob(recruiter.id, { company: 'Alpha Inc', status: 'closed', location: 'Delhi' });
+    await seedJob(recruiter.id, { company: 'Beta Labs', status: 'open', location: 'Pune', skills: ['Python'] });
+
+    const res = await request(app).get('/api/jobs/companies');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
+
+    const alpha = res.body.data.find((c: { name: string }) => c.name === 'Alpha Inc');
+    expect(alpha).toBeDefined();
+    expect(alpha.openJobs).toBe(2);
+    expect(alpha.locations).toContain('Remote');
+    expect(alpha.locations).toContain('Bangalore');
+    expect(alpha.skills).toContain('React');
+
+    const beta = res.body.data.find((c: { name: string }) => c.name === 'Beta Labs');
+    expect(beta).toBeDefined();
+    expect(beta.openJobs).toBe(1);
+  });
+});
+

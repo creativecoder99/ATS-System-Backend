@@ -134,6 +134,42 @@ export const listMyJobs = asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data: jobs });
 });
 
+/**
+ * GET /api/jobs/companies — public aggregation of active hiring organizations.
+ *
+ * Groups all open jobs by company name, returning open role counts,
+ * active locations, and distinct skills demanded by that employer.
+ */
+export const listCompanies = asyncHandler(async (_req: Request, res: Response) => {
+  const companies = await Job.aggregate([
+    { $match: { status: 'open' } },
+    {
+      $group: {
+        _id: '$company',
+        openJobs: { $sum: 1 },
+        locations: { $addToSet: '$location' },
+        skills: { $push: '$skills' },
+        types: { $addToSet: '$type' },
+        workModes: { $addToSet: '$workMode' },
+        latestJobDate: { $max: '$createdAt' },
+      },
+    },
+    { $sort: { openJobs: -1, _id: 1 } },
+  ]);
+
+  const formatted = companies.map((c) => ({
+    name: c._id,
+    openJobs: c.openJobs,
+    locations: (c.locations || []).filter(Boolean).slice(0, 3),
+    skills: Array.from(new Set((c.skills || []).flat().filter(Boolean))).slice(0, 6),
+    types: c.types || [],
+    workModes: c.workModes || [],
+    latestJobDate: c.latestJobDate,
+  }));
+
+  res.json({ success: true, data: formatted });
+});
+
 function assertCanManage(job: IJob, req: Request): void {
   const isOwner = job.postedBy.toString() === req.user!.id;
   if (!isOwner && req.user!.role !== 'admin') {
@@ -145,3 +181,4 @@ function assertCanManage(job: IJob, req: Request): void {
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
