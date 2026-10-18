@@ -43,6 +43,21 @@ export function createApp(): Express {
     }),
   );
 
+  app.get('/', (_req, res) => {
+    res.json({
+      success: true,
+      message: 'HireDesk ATS API is running',
+      environment: env.NODE_ENV,
+      version: '1.0.0',
+      apiBaseUrl: '/api',
+      clientOrigin: env.CLIENT_ORIGIN,
+    });
+  });
+
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+  });
+
   app.use('/api', routes);
 
   app.use(notFoundHandler);
