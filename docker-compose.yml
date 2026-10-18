@@ -1,0 +1,40 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: hiredesk-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+    container_name: hiredesk-api
+    restart: unless-stopped
+    ports:
+      - '4000:4000'
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # "mongo" is the service name above — Compose resolves it on its network.
+      MONGO_URI: mongodb://mongo:27017/hiredesk
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_access_secret_change_me_please}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_change_me_please}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
+    volumes:
+      # Uploaded resumes survive a container rebuild.
+      - uploads:/app/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:
+  uploads:

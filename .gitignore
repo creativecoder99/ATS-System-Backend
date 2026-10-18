@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Uploads directory (keep .gitkeep so empty directory persists)
+uploads/*
+!uploads/.gitkeep
+
+# Testing and coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
