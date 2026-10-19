@@ -16,6 +16,21 @@ router.get('/mine', requireAuth, requireRole('recruiter', 'admin'), jobControlle
 router.get('/saved', requireAuth, savedJobController.listSavedJobs);
 router.get('/companies', jobController.listCompanies);
 
+router.post(
+  '/recruiter/ai-assistant',
+  requireAuth,
+  requireRole('recruiter', 'admin'),
+  applicationController.askRecruiterGlobalCopilotController,
+);
+
+router.post(
+  '/candidate/ai-assistant',
+  requireAuth,
+  requireRole('candidate'),
+  applicationController.askCandidateJobAdvisorController,
+);
+
+
 
 router.get('/', validate({ query: listJobsSchema }), jobController.listJobs);
 router.post(

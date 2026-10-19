@@ -264,9 +264,10 @@ async function seed() {
 
       const aiReview = evaluateCandidate(job as any, { parsedProfile } as any, candidate as any);
 
-      const app = await Application.create({
+      await Application.create({
         job: job._id,
         applicant: candidate._id,
+
         resumeUrl: 'sample-resume.pdf',
         coverLetter: `I am very interested in the ${job.title} role at ${job.company}. My background in ${candidate.skills.slice(0, 2).join(' and ')} lines up well with what you are looking for.`,
         status,

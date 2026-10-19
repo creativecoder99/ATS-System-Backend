@@ -235,3 +235,48 @@ describe('GET /api/jobs/companies', () => {
   });
 });
 
+describe('POST /api/jobs/recruiter/ai-assistant', () => {
+  it('evaluates candidates across the recruiter jobs', async () => {
+    const recruiter = await makeUser('recruiter');
+    const job = await seedJob(recruiter.id, { title: 'Software Developer', skills: ['React', 'TypeScript'] });
+    const candidate = await makeUser('candidate');
+    const { Application } = await import('../src/models/Application.js');
+    await Application.create({
+      job: job._id,
+      applicant: candidate.id,
+      resumeUrl: 'resume.pdf',
+      parsedProfile: { skills: ['React', 'TypeScript'], experienceYears: 3 },
+    });
+
+    const res = await request(app)
+      .post('/api/jobs/recruiter/ai-assistant')
+      .set('Authorization', recruiter.auth)
+      .send({ prompt: 'Find the best candidate for Software Developer' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.answer).toBeDefined();
+    expect(Array.isArray(res.body.data.topCandidates)).toBe(true);
+  });
+});
+
+describe('POST /api/jobs/candidate/ai-assistant', () => {
+  it('recommends jobs matching the candidate query', async () => {
+    const recruiter = await makeUser('recruiter');
+    await seedJob(recruiter.id, { title: 'Junior Software Developer', skills: ['React', 'TypeScript'], location: 'Bangalore' });
+    const candidate = await makeUser('candidate');
+
+    const res = await request(app)
+      .post('/api/jobs/candidate/ai-assistant')
+      .set('Authorization', candidate.auth)
+      .send({ prompt: 'recommend all jobs related to software developer in Bangalore' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.answer).toBeDefined();
+    expect(Array.isArray(res.body.data.recommendedJobs)).toBe(true);
+    expect(res.body.data.recommendedJobs.length).toBeGreaterThan(0);
+  });
+});
+
+

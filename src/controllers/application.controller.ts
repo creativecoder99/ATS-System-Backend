@@ -15,8 +15,11 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { isDuplicateKeyError } from '../utils/mongoErrors.js';
 import { extractTextFromFile, parseResumeText } from '../services/resumeParser.js';
 import { generateEmbedding, searchJobApplicants } from '../services/semanticSearch.js';
-import { evaluateCandidate, queryJobCopilot } from '../services/aiAssistant.js';
+import { evaluateCandidate } from '../services/aiAssistant.js';
+import { queryRecruiterAssistant, queryCandidateAdvisor } from '../services/gemini.service.js';
 import { sendNotification } from './notification.controller.js';
+
+
 
 /**
  * Async background worker to extract text, structure profile JSON, redact PII,
@@ -309,7 +312,7 @@ export const searchApplicantsController = asyncHandler(async (req: Request, res:
   res.json({ success: true, data: results });
 });
 
-/** POST /api/jobs/:id/ai-assistant — interactive AI copilot for recruiter. */
+/** POST /api/jobs/:id/ai-assistant — interactive AI copilot for recruiter on a specific job. */
 export const askJobCopilotController = asyncHandler(async (req: Request, res: Response) => {
   const jobId = req.params.id;
   const { prompt } = req.body;
@@ -320,12 +323,61 @@ export const askJobCopilotController = asyncHandler(async (req: Request, res: Re
   assertOwnsJob(job.postedBy.toString(), req);
 
   const applications = await Application.find({ job: job._id })
-    .populate('applicant', 'name email headline skills experienceYears')
+    .populate('applicant', 'name email headline skills experienceYears location')
+    .populate('job', 'title skills experienceMin location workMode')
     .lean();
 
-  const response = queryJobCopilot(job, applications as any, prompt);
+  const response = await queryRecruiterAssistant(prompt, [job], applications as any);
   res.json({ success: true, data: response });
 });
+
+/** POST /api/jobs/recruiter/ai-assistant — global AI hiring assistant for recruiter across all their jobs. */
+export const askRecruiterGlobalCopilotController = asyncHandler(async (req: Request, res: Response) => {
+  const { prompt, jobId } = req.body;
+  if (!prompt || typeof prompt !== 'string') throw ApiError.badRequest('Prompt is required');
+
+  // Find all jobs owned by recruiter (or specific jobId if provided)
+  const jobFilter: any = { postedBy: req.user!.id };
+  if (jobId && jobId !== 'all') {
+    jobFilter._id = jobId;
+  }
+
+  const jobs = await Job.find(jobFilter).lean();
+  if (jobs.length === 0) {
+    return res.json({
+      success: true,
+      data: {
+        answer: 'You have not posted any jobs yet. Post an open role first to evaluate candidate submissions.',
+        topCandidates: [],
+        usedLlm: false,
+      },
+    });
+  }
+
+  const jobIds = jobs.map((j) => j._id);
+  const applications = await Application.find({ job: { $in: jobIds } })
+    .populate('applicant', 'name email headline skills experienceYears location')
+    .populate('job', 'title skills experienceMin location workMode')
+    .lean();
+
+  const response = await queryRecruiterAssistant(prompt, jobs as any, applications as any);
+  res.json({ success: true, data: response });
+});
+
+/** POST /api/jobs/candidate/ai-assistant — AI job recommendation advisor for candidate. */
+export const askCandidateJobAdvisorController = asyncHandler(async (req: Request, res: Response) => {
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== 'string') throw ApiError.badRequest('Prompt is required');
+
+  const candidate = await User.findById(req.user!.id).lean();
+  if (!candidate) throw ApiError.notFound('Candidate user not found');
+
+  const openJobs = await Job.find({ status: 'open' }).lean();
+
+  const response = await queryCandidateAdvisor(prompt, candidate as any, openJobs as any);
+  res.json({ success: true, data: response });
+});
+
 
 async function resolveResumeUrl(req: Request, userId: string): Promise<string> {
   if (req.file) return req.file.filename;
