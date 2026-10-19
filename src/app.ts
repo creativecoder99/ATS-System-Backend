@@ -32,18 +32,15 @@ export function createApp(): Express {
     app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
   }
 
-  app.use(
-    '/api',
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      limit: 300,
-      standardHeaders: 'draft-7',
-      legacyHeaders: false,
-      // Tests fire hundreds of requests in seconds; the limiter would fail them
-      // for the wrong reason.
-      skip: () => env.NODE_ENV === 'test',
-    }),
-  );
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 300,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    // Tests fire hundreds of requests in seconds; the limiter would fail them
+    // for the wrong reason.
+    skip: () => env.NODE_ENV === 'test',
+  });
 
   app.get('/', (_req, res) => {
     res.json({
@@ -60,7 +57,9 @@ export function createApp(): Express {
     res.json({ status: 'ok', uptime: process.uptime() });
   });
 
-  app.use('/api', routes);
+  // Support both /api and root paths so requests work seamlessly with or without /api prefix
+  app.use('/api', apiLimiter, routes);
+  app.use(apiLimiter, routes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
