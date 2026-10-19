@@ -371,11 +371,18 @@ async function seed() {
   await connectDB();
   console.log('[seed] clearing existing data');
 
+  const demoEmails = [
+    ...RECRUITERS.map((r) => r.email.toLowerCase()),
+    ...CANDIDATES.map((c) => c.email.toLowerCase()),
+    'admin@hirehive.com',
+  ];
+
   await Promise.all([
-    User.deleteMany({}),
+    User.deleteMany({ email: { $in: demoEmails } }),
     Job.deleteMany({}),
     Application.deleteMany({}),
     SavedJob.deleteMany({}),
+    Notification.deleteMany({}),
   ]);
 
   // create() (not insertMany) so the pre-save hook hashes each password.
