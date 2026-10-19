@@ -1,6 +1,13 @@
 import mongoose, { Schema, type Document, type Model, type Types } from 'mongoose';
 
-export type NotificationType = 'status_update' | 'application_received' | 'job_alert' | 'system';
+export type NotificationType =
+  | 'status_update'
+  | 'application_received'
+  | 'job_alert'
+  | 'system'
+  | 'verification_submitted'
+  | 'verification_approved'
+  | 'verification_rejected';
 
 export interface INotification extends Document {
   _id: Types.ObjectId;
@@ -19,7 +26,15 @@ const notificationSchema = new Schema<INotification>(
     recipient: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: {
       type: String,
-      enum: ['status_update', 'application_received', 'job_alert', 'system'],
+      enum: [
+        'status_update',
+        'application_received',
+        'job_alert',
+        'system',
+        'verification_submitted',
+        'verification_approved',
+        'verification_rejected',
+      ],
       default: 'status_update',
     },
     title: { type: String, required: true, maxlength: 150 },
