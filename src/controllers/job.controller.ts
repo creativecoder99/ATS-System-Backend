@@ -55,7 +55,7 @@ export const listJobs = asyncHandler(async (req: Request, res: Response) => {
       .sort(sortMap[sort] as Record<string, 1 | -1>)
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate('postedBy', 'name company')
+      .populate('postedBy', 'name company isVerified verificationStatus')
       .lean(),
     Job.countDocuments(filter),
   ]);
@@ -76,7 +76,9 @@ export const listJobs = asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /api/jobs/:id — adds per-viewer flags when the caller is signed in. */
 export const getJob = asyncHandler(async (req: Request, res: Response) => {
-  const job = await Job.findById(req.params.id).populate('postedBy', 'name company email').lean();
+  const job = await Job.findById(req.params.id)
+    .populate('postedBy', 'name company email isVerified verificationStatus')
+    .lean();
   if (!job) throw ApiError.notFound('Job not found');
 
   let hasApplied = false;

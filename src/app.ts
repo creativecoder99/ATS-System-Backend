@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import routes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
+import { UPLOAD_DIR } from './middleware/upload.js';
 import { env } from './config/env.js';
 
 export function createApp(): Express {
@@ -25,6 +26,7 @@ export function createApp(): Express {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
+  app.use('/uploads', express.static(UPLOAD_DIR));
 
   if (env.NODE_ENV !== 'test') {
     app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));

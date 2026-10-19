@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import * as authController from '../controllers/auth.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
+import { uploadVerificationDoc } from '../middleware/upload.js';
 import { loginSchema, registerSchema, updateProfileSchema } from '../validators/auth.schema.js';
 import { env } from '../config/env.js';
 
@@ -33,4 +34,23 @@ router.patch(
   authController.updateProfile,
 );
 
+// Verification Document Endpoints
+router.post(
+  '/me/verification-docs',
+  requireAuth,
+  uploadVerificationDoc,
+  authController.uploadVerificationDocHandler,
+);
+router.delete(
+  '/me/verification-docs/:docId',
+  requireAuth,
+  authController.deleteVerificationDocHandler,
+);
+router.post(
+  '/me/submit-verification',
+  requireAuth,
+  authController.submitVerificationRequest,
+);
+
 export default router;
+

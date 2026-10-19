@@ -5,6 +5,7 @@ import jobRoutes from './job.routes.js';
 import applicationRoutes from './application.routes.js';
 import statsRoutes from './stats.routes.js';
 import notificationRoutes from './notification.routes.js';
+import adminRoutes from './admin.routes.js';
 
 const router = Router();
 
@@ -24,5 +25,7 @@ router.use('/jobs', jobRoutes);
 router.use('/applications', applicationRoutes);
 router.use('/stats', statsRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;
+

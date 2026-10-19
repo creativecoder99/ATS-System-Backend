@@ -113,7 +113,7 @@ export const applyToJob = asyncHandler(async (req: Request, res: Response) => {
     );
   });
 
-  res.status(201).json({ success: true, data: application });
+  res.status(201).json({ success: true, message: 'Applied successfully', data: application });
 });
 
 /** GET /api/applications/mine — the candidate's own applications. */
@@ -162,7 +162,10 @@ export const listJobApplications = asyncHandler(async (req: Request, res: Respon
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate('applicant', 'name email headline location skills experienceYears')
+      .populate(
+        'applicant',
+        'name email headline location skills experienceYears isVerified verificationStatus'
+      )
       .lean(),
     Application.countDocuments(filter),
   ]);

@@ -37,3 +37,28 @@ export const uploadResume = multer({
     cb(null, true);
   },
 }).single('resume');
+
+const ALLOWED_VERIFICATION_MIME = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+export const uploadVerificationDoc = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_VERIFICATION_MIME.has(file.mimetype)) {
+      return cb(
+        ApiError.badRequest(
+          'Verification document must be a PDF, Word document, or image (JPG, PNG, WEBP)'
+        )
+      );
+    }
+    cb(null, true);
+  },
+}).single('document');
+
